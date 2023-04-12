@@ -22,6 +22,7 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
     // Ashwin: Outer loop un-necessary (?) tid should implicitly account for the centre of the receptive field
     // Iterate over the input image or feature map
     // for (int idx = tid; idx < input_size; idx += stride)
+    
     {
         // Calculate the row and column index
         int row = tidx / i_w;
@@ -36,27 +37,33 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
         // Iterate over the pooling window
         for (int i = -f_w / 2; i <= f_w / 2; i++) {
             for (int j = -f_h / 2; j <= f_h / 2; j++) {
-                // Calculate the input index
-                int input_row = row + i;
-                int input_col = col + j;
+                // Calculate the input index, accounting for (left side) padding
+                // right side padding is inconsequential
+                int input_row = row + i - padding;
+                int input_col = col + j - padding;
+
                 int input_idx = input_row * i_w + input_col;
 
                 // Check if the input index is valid
+                // clamp the index to the range of the input matrix
                 if (input_row >= 0 && input_row < i_h &&
                     input_col >= 0 && input_col < i_w)
                 {
                     // Update the max value if necessary
                     FLOATTYPE val = in[input_idx];
-                    if (val > max_val)
-                    {
-                        max_val = val;
-                    }
+                    max_val = fmaxf(max_val, val);
+                    // printf("idx(row,col): (%d, %d); val: %f\n", input_row, input_col, val);
+                    // if (val > max_val)
+                    // {
+                    //     max_val = val;
+                    // }
                 }
             }
         }
 
         // Write the max value to the output
         int out_idx = row * o_w + col;
+        // printf("out_idx: %d; out_val:%f\n", out_idx, max_val);
         out[out_idx] = max_val;
     }
 }
@@ -145,11 +152,13 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
     int o_h = ((i_h + 2 * p_h - fh) / s_h) + 1;
     int o_w = ((i_w + 2 * p_w - fw) / s_w) + 1;
 
+    printf("output dims: %d, %d\n", o_h, o_w);
+    
     long int outImageSize = sizeof(FLOATTYPE) * c * o_w * o_h;
 
     FLOATTYPE *cOutImage = (FLOATTYPE *)malloc(outImageSize);
     FLOATTYPE *gOutImage;
-
+    
     struct timespec start, end;
 
     CUDA_CALL(cudaMalloc((void **)&gImage, imageSize));
@@ -158,10 +167,10 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
     CUDA_CALL(cudaMemset((void *)gOutImage, 0, outImageSize));
 
     // Does not include padding
-    fillImage(cImage, c, i_h, i_w);
+    fillImage_floattype(cImage, c, i_h, i_w);
 
-    printf("I = checksum: %lf\n", calculateChecksum(cImage, c, i_h, i_w));
-
+    printf("I = checksum: %lf\n", calculateChecksum_float(cImage, c, i_h, i_w));
+    
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -176,8 +185,10 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
     printf("Copy host->dev %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
     int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
-    dim3 blockDim(TW, TH);
-    dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
+    // dim3 blockDim(TW, TH);
+    // dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
+    dim3 gridDim(1);
+    dim3 blockDim(32);
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -209,7 +220,7 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
     }
     printf("Copy dev->host %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
-    printf("CUDA O = checksum: %f\n", calculateChecksum(cOutImage, c, o_h, o_w));
+    printf("CUDA O = checksum: %f\n", calculateChecksum_float(cOutImage, c, o_h, o_w));
 
     free(cImage);
     free(cOutImage);
@@ -239,9 +250,9 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
     CUDA_CALL(cudaMemset((void *)gOutImage, 0, outImageSize));
 
     // Does not include padding
-    fillImage(cImage, c, h, w);
+    fillImage_floattype(cImage, c, h, w);
 
-    printf("I = checksum: %lf\n", calculateChecksum(cImage, c, h, w));
+    printf("I = checksum: %lf\n", calculateChecksum_float(cImage, c, h, w));
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -289,7 +300,7 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
     }
     printf("Copy dev->host %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
-    printf("CUDA O = checksum: %f\n", calculateChecksum(cOutImage, c, h, w));
+    printf("CUDA O = checksum: %f\n", calculateChecksum_float(cOutImage, c, h, w));
 
     free(cImage);
     free(cOutImage);
@@ -397,7 +408,8 @@ int main(int argc, char *argv[])
     int FW = atoi(argv[4]);
     int FH = atoi(argv[5]);
     int padding = atoi(argv[6]);
-
+    
+    printf("C:%d; H:%d; W:%d; FW:%d; FH:%d; padding:%d\n", C, H, W, FW, FH, padding);
     printf("Reference Max Pool Using CUDA\n");
     // internally handles padding logic
     cudaMaxPooling_Ref(C, H, W, FW, FH);

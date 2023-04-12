@@ -10,7 +10,7 @@ static double TimeSpecToSeconds(struct timespec *ts)
 
 // Fills image with running counter of data
 // Does not include padding
-void fillImage(FLOATTYPE *image, int c, int h, int w)
+void fillImage_floattype(FLOATTYPE *image, int c, int h, int w)
 {
     for (int i = 0; i < c; i++)
     {
@@ -18,13 +18,13 @@ void fillImage(FLOATTYPE *image, int c, int h, int w)
         {
             for (int k = 0; k < w; k++)
             {
-                image[i * h * w + j * w + k] = i * (j + k);
+                image[i * h * w + j * w + k] = i * h * w + j * w + k;
             }
         }
     }
 }
 
-FLOATTYPE calculateChecksum(FLOATTYPE *image, int c, int h, int w)
+FLOATTYPE calculateChecksum_float(FLOATTYPE *image, int c, int h, int w)
 {
     FLOATTYPE checksum = 0.0;
     for (int i = 0; i < c; i++)

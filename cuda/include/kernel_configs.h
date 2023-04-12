@@ -29,3 +29,14 @@
         cudaError_t ____rc = (x);      \
         assert(____rc == cudaSuccess); \
     } while (0)
+
+#define checkCUDNN(expression)                                     \
+    {                                                              \
+        cudnnStatus_t status = (expression);                       \
+        if (status != CUDNN_STATUS_SUCCESS)                        \
+        {                                                          \
+            std::cerr << "Error on line " << __LINE__ << ": "      \
+                      << cudnnGetErrorString(status) << std::endl; \
+            std::exit(EXIT_FAILURE);                               \
+        }                                                          \
+    }
