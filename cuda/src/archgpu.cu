@@ -86,6 +86,7 @@ __global__ void cudaMaxPool_ref(FLOATTYPE *gOutImage, FLOATTYPE *gImage, int c, 
     int tileHeightOffset = th * blockIdx.y;
     int channel = blockIdx.z;
 
+    // Creating input data with padding
     for (int x = threadIdx.x; x < pTW; x += tw)
     {
         int copy_x = x - fw / 2 + tileWidthOffset;
@@ -116,7 +117,7 @@ __global__ void cudaMaxPool_ref(FLOATTYPE *gOutImage, FLOATTYPE *gImage, int c, 
     {
         return;
     }
-
+    
     FLOATTYPE maxValue = shmem[shmem_offset(threadIdx.x, threadIdx.y, 0, 0, pTW, fw / 2, fh / 2)];
     for (int x = -fw / 2; x <= fw / 2; x++)
     {
@@ -134,8 +135,11 @@ __global__ void cudaMaxPool_ref(FLOATTYPE *gOutImage, FLOATTYPE *gImage, int c, 
 }
 
 
-void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
+void cudaMaxPooling(int padding, int c, int i_h, int i_w, int f_dim)
 {   
+    int fw = f_dim;
+    int fh = f_dim;
+
     int input_size = i_h * i_w;
     long int imageSize = sizeof(FLOATTYPE) * c * input_size;
 
@@ -222,6 +226,11 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
 
     printf("CUDA O = checksum: %f\n", calculateChecksum_float(cOutImage, c, o_h, o_w));
 
+    printf("Input tensor:\n");
+    print_tensor(cImage, c, i_h, i_w);
+    printf("Output tensor:\n");
+    print_tensor(cOutImage, c, o_h, o_w);
+    
     free(cImage);
     free(cOutImage);
     CUDA_CALL(cudaFree(gImage));
@@ -229,8 +238,11 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int fw, int fh)
 }
 
 
-void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
+void cudaMaxPooling_Ref(int c, int h, int w, int f_dim)
 {
+    int fw = f_dim;
+    int fh = f_dim;
+
     long int imageSize = sizeof(FLOATTYPE) * c * w * h;
 
     FLOATTYPE *cImage = (FLOATTYPE *)malloc(imageSize);
@@ -259,7 +271,9 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
         printf("CLOCK ERROR. Exiting.\n");
         std::exit(EXIT_FAILURE);
     }
+
     CUDA_CALL(cudaMemcpy(gImage, cImage, imageSize, cudaMemcpyHostToDevice));
+    
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -302,6 +316,11 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
 
     printf("CUDA O = checksum: %f\n", calculateChecksum_float(cOutImage, c, h, w));
 
+    printf("Input tensor:\n");
+    print_tensor(cImage, c, h, w);
+    printf("Output tensor:\n");
+    print_tensor(cOutImage, c, h, w);
+
     free(cImage);
     free(cOutImage);
     CUDA_CALL(cudaFree(gImage));
@@ -316,30 +335,22 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
 //     //     cout << "Missing an argument, Please input a padding size" << endl;
 //     //     exit(-1);
 //     // }
-
 //     // int padding = atoi(argv[1]);
 //     // cout << "Program start, padding is: " << padding << endl;
-
 //     // TODO: test suits
-
 //     FLOATTYPE *host_in, *host_out;
 //     FLOATTYPE *dev_in, *dev_out;
-
 //     size_t N = 64;
 //     float sum = 0.0;
 //     float sum1 = 0.0;
 //     float *rdtsc_arr;
-
 //     rdtsc_arr = (float *)calloc(NUM_RUNS, sizeof(float));
-
 //     double average, variance, std_dev;
-
 //     for (unsigned long long run_id = 0; run_id < NUM_RUNS; run_id++)
 //     {
 //         // create buffer on host
 //         host_in = (FLOATTYPE *)malloc(N * N * sizeof(FLOATTYPE));
 //         host_out = (FLOATTYPE *)malloc(N * N * sizeof(FLOATTYPE));
-
 //         // creates a matrix stored in row major order
 //         for (int i = 0; i != N; ++i)
 //         {
@@ -348,7 +359,6 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
 //                 host_in[i * N + j] = i * N + j;
 //             }
 //         }
-
 //         // allocate memory for device
 //         cudaError_t err = cudaMalloc(&dev_in, N * N * sizeof(FLOATTYPE)); // TODO: allocate the size of array (an image)
 //         if (err != cudaSuccess)
@@ -356,48 +366,38 @@ void cudaMaxPooling_Ref(int c, int h, int w, int fw, int fh)
 //             cout << "Dev Memory not allocated" << endl;
 //             exit(-1);
 //         }
-
 //         err = cudaMalloc(&dev_out, N * N * sizeof(FLOATTYPE)); // TODO: allocate the size of array (an image)
 //         if (err != cudaSuccess)
 //         {
 //             cout << "Dev Memory not allocated" << endl;
 //             exit(-1);
 //         }
-
 //         // copy data into device
 //         cudaMemcpy(dev_in, host_in, N * N * sizeof(FLOATTYPE), cudaMemcpyHostToDevice); // TODO: pass the size of array into to function
-
 //         // create GPU timing events for timing the GPU
 //         cudaEvent_t st2, et2;
 //         cudaEventCreate(&st2);
 //         cudaEventCreate(&et2);
-
 //         // calling maxpooling kernel
 //         cudaEventRecord(st2);
 //         dim3 grid(1);
 //         dim3 block(128);
 //         // int padding, float input_size, float input_width, float input_height, float output_size, float output_width, float *in, float *out)
-
 //         kernel_max_pooling<<<grid, block>>>(padding, N * N, N, N, N * N, N, dev_in, dev_out);
 //         cudaEventRecord(et2);
-
 //         // host waits until et2 has occured
 //         cudaEventSynchronize(et2);
-
 //         float milliseconds = 0;
 //         cudaEventElapsedTime(&milliseconds, st2, et2);
 //         cout << "Kernel time: " << milliseconds << "ms" << endl;
 //         // copy data out
 //         cudaMemcpy(host_out, dev_out, N * N * sizeof(FLOATTYPE), cudaMemcpyDeviceToHost); // TODO: pass the size of array into to function
-
 //         // free memory
 //         free(host_in);
 //         free(host_out);
 //         cudaFree(dev_in);
 //         cudaFree(dev_out);
 //     }
-
-   
 // }
 
 int main(int argc, char *argv[])
@@ -405,20 +405,22 @@ int main(int argc, char *argv[])
     int C = atoi(argv[1]);
     int H = atoi(argv[2]);
     int W = atoi(argv[3]);
-    int FW = atoi(argv[4]);
-    int FH = atoi(argv[5]);
-    int padding = atoi(argv[6]);
+    // Assume that filter dims is square FW = FH
+    int F_dim = atoi(argv[4]);
     
-    printf("C:%d; H:%d; W:%d; FW:%d; FH:%d; padding:%d\n", C, H, W, FW, FH, padding);
+    // padding is always floor(F_dim/ 2) to ensure tensor output dims == tensor input dims
+    int padding = F_dim/ 2;
+    
+    printf("C:%d; H:%d; W:%d; F_dim:%d; padding:%d\n", C, H, W, F_dim, padding);
     printf("Reference Max Pool Using CUDA\n");
     // internally handles padding logic
-    cudaMaxPooling_Ref(C, H, W, FW, FH);
+    cudaMaxPooling_Ref(C, H, W, F_dim);
     printf("\n");
 
     printf("FC2: Max Pool Using CUDA\n");
     // requires padding as input & perform correction
     // (int padding, int c, int i_h, int i_w, int fw, int fh)
-    cudaMaxPooling(padding, C, H, W, FW, FH);
+    cudaMaxPooling(padding, C, H, W, F_dim);
 
     return 0;
 }

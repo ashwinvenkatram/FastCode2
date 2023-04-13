@@ -24,6 +24,21 @@ void fillImage_floattype(FLOATTYPE *image, int c, int h, int w)
     }
 }
 
+void print_tensor(FLOATTYPE *image, int c, int h, int w)
+{
+    for (int i = 0; i < c; i++)
+    {
+        for (int j = 0; j < h; j++)
+        {
+            for (int k = 0; k < w; k++)
+            {
+                std::cout << image[i * h * w + j * w + k] << "\t";
+            }
+            std::cout << "\n";
+        }
+    }
+}
+
 FLOATTYPE calculateChecksum_float(FLOATTYPE *image, int c, int h, int w)
 {
     FLOATTYPE checksum = 0.0;

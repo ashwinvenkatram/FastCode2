@@ -12,7 +12,7 @@ refcpu:
 
 archgpu:
 	$(CUDA_COMPILER) -o build/archgpu $(SRC_DIR)archgpu.cu -lcublas -lcudnn 
-	# ./build/archgpu 512 13 13 5 5 2
+	./build/archgpu 1 13 13 5 > log.out
 
 archcpu:
 	g++ -o build/archcpu $(SRC_DIR)arch.cpp -std=c++11
@@ -20,4 +20,5 @@ archcpu:
 
 clean:
 	rm -f ./build/*
+	rm *.out
 

@@ -15,12 +15,12 @@
     {                                                     \
     }
 
-#define H 1024
-#define W 1024
-#define C 3
+#define H 13
+#define W 13
+#define C 1
 
-#define FH 21
-#define FW 21
+#define FH 5
+#define FW 5
 
 #define TW 32
 #define TH 32
@@ -72,7 +72,7 @@ void fillImage(double *image, int c, int h, int w)
         {
             for (int k = 0; k < w; k++)
             {
-                image[i * h * w + j * w + k] = i * (j + k);
+                image[i * h * w + j * w + k] = i * h * w + j * w + k;;
             }
         }
     }
@@ -419,6 +419,7 @@ void cudnnMaxPooling(int c, int h, int w, int fw, int fh)
     // create descriptor handle
     checkCUDNN(cudnnCreatePoolingDescriptor(&pooling_desc));
     // initialize descriptor
+    
     checkCUDNN(cudnnSetPooling2dDescriptor(pooling_desc,            // descriptor handle
                                            CUDNN_POOLING_MAX,       // mode - max pooling
                                            CUDNN_NOT_PROPAGATE_NAN, // NaN propagation mode
