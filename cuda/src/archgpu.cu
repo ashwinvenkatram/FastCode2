@@ -16,48 +16,51 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
 
     // Outer loop un-necessary; tidx implicitly account for the centre of the receptive field
     
-    // hack for now; TODO: Change launch configs to handle this better
-    if(tidx < 169)
+    // Calculate the spatial row and column index
+    // invariant to channel iteration
+    int row = tidx / i_w;
+    int col = tidx % i_h;
+
+    // if thread is accessing out-of-bounds, return
+    if (row < 0 || row >= i_h || col < 0 || col >= i_w)
     {
-        // Iterate over the input channel dim
-        for (int c_iter = 0; c_iter < c; c_iter++){
+        return;
+    }
 
-            // Calculate the spatial row and column index
-            int row = tidx / i_w;
-            int col = tidx % i_h;
+    // Iterate over the input channel dim
+    for (int c_iter = 0; c_iter < c; c_iter++){
 
-            // Initialize the max value to the minimum float value
-            FLOATTYPE max_val = 0.0;
+        // Initialize the max value to the minimum float value
+        FLOATTYPE max_val = 0.0;
 
-            int input_channel_offset = c_iter * input_spatial_size;
-            int output_channel_offset = c_iter * output_spatial_size;
+        int input_channel_offset = c_iter * input_spatial_size;
+        int output_channel_offset = c_iter * output_spatial_size;
 
-            // Iterate over the pooling window
-            for (int i = -f_w / 2; i <= f_w / 2; i++) {
-                for (int j = -f_h / 2; j <= f_h / 2; j++) {
-                    // Calculate the input index, accounting for (left side) padding
-                    // right side padding is inconsequential
-                    int input_row = row + i;
-                    int input_col = col + j;
-                    
-                    // Check if the input index is valid to sub-tensor
-                    // clamp the index to the range of the input matrix
-                    // else encroaches into previous tensor
-                    if (input_row >= 0 && input_row < i_h &&
-                        input_col >= 0 && input_col < i_w)
-                    {
-                        int input_idx = input_channel_offset + input_row * i_w + input_col;
-                        // Update the max value if necessary
-                        FLOATTYPE val = in[input_idx];
-                        max_val = fmaxf(max_val, val);
-                    }
+        // Iterate over the pooling window
+        for (int i = -f_w / 2; i <= f_w / 2; i++) {
+            for (int j = -f_h / 2; j <= f_h / 2; j++) {
+                // Calculate the input index, accounting for (left side) padding
+                // right side padding is inconsequential
+                int input_row = row + i;
+                int input_col = col + j;
+                
+                // Check if the input index is valid to sub-tensor
+                // clamp the index to the range of the input matrix
+                // else encroaches into previous tensor
+                if (input_row >= 0 && input_row < i_h &&
+                    input_col >= 0 && input_col < i_w)
+                {
+                    int input_idx = input_channel_offset + input_row * i_w + input_col;
+                    // Update the max value if necessary
+                    FLOATTYPE val = in[input_idx];
+                    max_val = fmaxf(max_val, val);
                 }
             }
-
-            // Write the max value to the output
-            int out_idx = output_channel_offset + row * o_w + col;
-            out[out_idx] = max_val;
         }
+
+        // Write the max value to the output
+        int out_idx = output_channel_offset + row * o_w + col;
+        out[out_idx] = max_val;
     }
 }
 
