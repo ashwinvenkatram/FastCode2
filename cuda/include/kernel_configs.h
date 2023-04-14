@@ -1,8 +1,5 @@
+// #define PRINT_DEBUG 1
 #define FLOATTYPE float
-
-// below used for reference impl
-// #define FH 21
-// #define FW 21
 
 #define TW 32
 #define TH 32
