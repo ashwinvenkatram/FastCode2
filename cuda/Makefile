@@ -11,10 +11,11 @@ refcpu:
 	./build/refcpu
 
 archgpu:
-	$(CUDA_COMPILER) -o build/archgpu $(SRC_DIR)archgpu.cu -lcublas -lcudnn 
-	./build/archgpu 1 13 13 5
-	./build/archgpu 1 13 13 9
-	./build/archgpu 1 13 13 13
+	$(CUDA_COMPILER) -o build/archgpu $(SRC_DIR)archgpu.cu -lcublas -lcudnn
+	# ./build/archgpu NUM_CHANNELS INPUT_WIDTH INPUT_HEIGH FILTER_DIM NUM_RUNS 
+	./build/archgpu 512 13 13 5 1
+	./build/archgpu 512 13 13 9 1
+	./build/archgpu 512 13 13 13 1
 
 archcpu:
 	g++ -o build/archcpu $(SRC_DIR)arch.cpp -std=c++11

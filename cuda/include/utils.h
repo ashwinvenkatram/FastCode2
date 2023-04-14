@@ -36,6 +36,8 @@ void print_tensor(FLOATTYPE *image, int c, int h, int w)
             }
             std::cout << "\n";
         }
+
+        std::cout << "\n\n";
     }
 }
 

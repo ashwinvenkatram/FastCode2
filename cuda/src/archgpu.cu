@@ -4,60 +4,60 @@
 #include <stdio.h>
 #include <assert.h>
 #include "../include/utils.h"
-// #include "kernel_configs.h"
 
 using namespace std;
 
-unsigned long long NUM_RUNS = 1;
-
-// __global__ void kernel_max_pooling(int padding, int input_size, int input_width, int input_height, int output_size, int output_width, float *in, float *out)
 __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c, 
-                                    int i_h, int i_w, int input_size,
-                                    int f_w, int f_h, int o_h, int o_w, int padding)
+                                    int i_h, int i_w, int input_spatial_size,
+                                    int f_w, int f_h, int o_h, int o_w, int output_spatial_size, int padding)
 {
     // Determine the thread and block index
     int tidx = threadIdx.x + blockIdx.x * blockDim.x;
 
-    // Ashwin: Outer loop un-necessary (?) tid should implicitly account for the centre of the receptive field
-    // Iterate over the input image or feature map
-    // for (int idx = tid; idx < input_size; idx += stride)
+    // Outer loop un-necessary; tidx implicitly account for the centre of the receptive field
     
+    // hack for now; TODO: Change launch configs to handle this better
+    if(tidx < 169)
     {
-        // Calculate the row and column index
-        int row = tidx / i_w;
-        int col = tidx % i_h;
+        // Iterate over the input channel dim
+        for (int c_iter = 0; c_iter < c; c_iter++){
 
-        // Calculate the output index
-        // int out_idx = (row - padding) * output_width + (col - padding);
+            // Calculate the spatial row and column index
+            int row = tidx / i_w;
+            int col = tidx % i_h;
 
-        // Initialize the max value to the minimum float value
-        FLOATTYPE max_val = -FLT_MAX;
+            // Initialize the max value to the minimum float value
+            FLOATTYPE max_val = 0.0;
 
-        // Iterate over the pooling window
-        for (int i = -f_w / 2; i <= f_w / 2; i++) {
-            for (int j = -f_h / 2; j <= f_h / 2; j++) {
-                // Calculate the input index, accounting for (left side) padding
-                // right side padding is inconsequential
-                int input_row = row + i;
-                int input_col = col + j;
+            int input_channel_offset = c_iter * input_spatial_size;
+            int output_channel_offset = c_iter * output_spatial_size;
 
-                int input_idx = input_row * i_w + input_col;
-
-                // Check if the input index is valid
-                // clamp the index to the range of the input matrix
-                if (input_row >= 0 && input_row < i_h &&
-                    input_col >= 0 && input_col < i_w)
-                {
-                    // Update the max value if necessary
-                    FLOATTYPE val = in[input_idx];
-                    max_val = fmaxf(max_val, val);
+            // Iterate over the pooling window
+            for (int i = -f_w / 2; i <= f_w / 2; i++) {
+                for (int j = -f_h / 2; j <= f_h / 2; j++) {
+                    // Calculate the input index, accounting for (left side) padding
+                    // right side padding is inconsequential
+                    int input_row = row + i;
+                    int input_col = col + j;
+                    
+                    // Check if the input index is valid to sub-tensor
+                    // clamp the index to the range of the input matrix
+                    // else encroaches into previous tensor
+                    if (input_row >= 0 && input_row < i_h &&
+                        input_col >= 0 && input_col < i_w)
+                    {
+                        int input_idx = input_channel_offset + input_row * i_w + input_col;
+                        // Update the max value if necessary
+                        FLOATTYPE val = in[input_idx];
+                        max_val = fmaxf(max_val, val);
+                    }
                 }
             }
-        }
 
-        // Write the max value to the output
-        int out_idx = row * o_w + col;
-        out[out_idx] = max_val;
+            // Write the max value to the output
+            int out_idx = output_channel_offset + row * o_w + col;
+            out[out_idx] = max_val;
+        }
     }
 }
 
@@ -133,8 +133,8 @@ FLOATTYPE cudaMaxPooling(int padding, int c, int i_h, int i_w, int f_dim)
     int fw = f_dim;
     int fh = f_dim;
 
-    int input_size = i_h * i_w;
-    long int imageSize = sizeof(FLOATTYPE) * c * input_size;
+    int input_spatial_size = i_h * i_w;
+    long int imageSize = sizeof(FLOATTYPE) * c * input_spatial_size;
 
     FLOATTYPE *cImage = (FLOATTYPE *)malloc(imageSize);
     FLOATTYPE *gImage;
@@ -151,8 +151,9 @@ FLOATTYPE cudaMaxPooling(int padding, int c, int i_h, int i_w, int f_dim)
 
     printf("output dims: %d, %d\n", o_h, o_w);
     
-    long int outImageSize = sizeof(FLOATTYPE) * c * o_w * o_h;
-
+    int output_spatial_size = o_w * o_h;
+    long int outImageSize = sizeof(FLOATTYPE) * c * output_spatial_size;
+    
     FLOATTYPE *cOutImage = (FLOATTYPE *)malloc(outImageSize);
     FLOATTYPE *gOutImage;
     
@@ -194,8 +195,8 @@ FLOATTYPE cudaMaxPooling(int padding, int c, int i_h, int i_w, int f_dim)
         std::exit(EXIT_FAILURE);
     }
     
-    kernel_max_pooling<<<gridDim, blockDim, shmem_size>>>(gImage, gOutImage, c, i_h, i_w, input_size, 
-                                                            fw, fh, o_h, o_w, padding);
+    kernel_max_pooling<<<gridDim, blockDim, shmem_size>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
+                                                            fw, fh, o_h, o_w, output_spatial_size, padding);
 
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
@@ -339,23 +340,26 @@ int main(int argc, char *argv[])
     int W = atoi(argv[3]);
     // Assume that filter dims is square FW = FH
     int F_dim = atoi(argv[4]);
+
+    int NUM_RUNS = atoi(argv[5]);
     
     // padding is always floor(F_dim/ 2) to ensure tensor output dims == tensor input dims
     int padding = F_dim/ 2;
     
-    printf("C:%d; H:%d; W:%d; F_dim:%d; padding:%d\n", C, H, W, F_dim, padding);
-    printf("Reference Max Pool Using CUDA\n");
-    // internally handles padding logic
-    FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim);
-    printf("\n");
+    for(int run=0; run < NUM_RUNS; run++){
+        printf("C:%d; H:%d; W:%d; F_dim:%d; padding:%d\n", C, H, W, F_dim, padding);
+        printf("Reference Max Pool Using CUDA\n");
+        // internally handles padding logic
+        FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim);
+        printf("\n");
 
-    printf("FC2: Max Pool Using CUDA\n");
-    // requires padding as input & perform correction
-    // (int padding, int c, int i_h, int i_w, int fw, int fh)
-    FLOATTYPE kernel_checksum = cudaMaxPooling(padding, C, H, W, F_dim);
+        printf("FC2: Max Pool Using CUDA\n");
+        // requires padding as input & perform correction
+        // (int padding, int c, int i_h, int i_w, int fw, int fh)
+        FLOATTYPE kernel_checksum = cudaMaxPooling(padding, C, H, W, F_dim);
 
-    assert(ref_checksum == kernel_checksum);
-    printf("==============================\n\n");
-
+        assert(ref_checksum == kernel_checksum);
+        printf("==============================\n\n");
+    }
     return 0;
 }
