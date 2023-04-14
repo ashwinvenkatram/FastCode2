@@ -312,9 +312,16 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
         std::exit(EXIT_FAILURE);
     }
     
-    integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
-                                                            fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size0);
+    // integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
+    //                                                         fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size0);
+    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, c, i_h, i_w, input_spatial_size, 
+                                                fw0, fh0, o_h0, o_w0, output_spatial_size0);
+    
+    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage1, c, i_h, i_w, input_spatial_size, 
+                                                fw1, fh1, o_h0, o_w0, output_spatial_size0);
 
+    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage2, c, i_h, i_w, input_spatial_size, 
+                                                fw2, fh2, o_h0, o_w0, output_spatial_size0);                                                
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -426,7 +433,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim)
     }
     printf("Copy host->dev %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
-    int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
+    // int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
     // dim3 blockDim(TW, TH);
     // dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
     dim3 gridDim(1);
@@ -438,7 +445,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim)
         std::exit(EXIT_FAILURE);
     }
     
-    kernel_max_pooling<<<gridDim, blockDim, shmem_size>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
+    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
                                                             fw, fh, o_h, o_w, output_spatial_size);
 
     if (clock_gettime(CLOCK_MONOTONIC, &end))
@@ -618,7 +625,7 @@ int main(int argc, char *argv[])
             for(int dim_iter=0; dim_iter< 3; dim_iter++){
                 ref_checksum_arr[dim_iter] = cudaMaxPooling_Ref(C, H, W, F_dim_arr[dim_iter]);
             }
-            
+
             printf("==============================\n\n");
             printf("Integrated Max Pool\n");
             cudaMaxPoolingIntegrated(C, H, W, F_dim_arr, kernel_checksum_arr);
