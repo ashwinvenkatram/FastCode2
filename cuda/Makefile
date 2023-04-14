@@ -12,10 +12,12 @@ refcpu:
 
 archgpu:
 	$(CUDA_COMPILER) -o build/archgpu $(SRC_DIR)archgpu.cu -lcublas -lcudnn
-	# ./build/archgpu NUM_CHANNELS INPUT_WIDTH INPUT_HEIGH FILTER_DIM NUM_RUNS 
-	./build/archgpu 512 13 13 5 1
-	./build/archgpu 512 13 13 9 1
-	./build/archgpu 512 13 13 13 1
+	# ./build/archgpu NUM_CHANNELS INPUT_WIDTH INPUT_HEIGH FILTER_DIM NUM_RUNS CASE_SELECT
+	# If CASE_SELECT == 1, FILTER_DIM is ignored
+	./build/archgpu 512 13 13 5 1 0
+	./build/archgpu 512 13 13 9 1 0
+	./build/archgpu 512 13 13 13 1 0
+	./build/archgpu 512 13 13 13 1 1
 
 archcpu:
 	g++ -o build/archcpu $(SRC_DIR)arch.cpp -std=c++11
