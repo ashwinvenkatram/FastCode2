@@ -17,7 +17,6 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
 {
     // Determine the thread and block index
     int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-    // int stride = blockDim.x * gridDim.x;
 
     // Ashwin: Outer loop un-necessary (?) tid should implicitly account for the centre of the receptive field
     // Iterate over the input image or feature map
@@ -39,8 +38,8 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
             for (int j = -f_h / 2; j <= f_h / 2; j++) {
                 // Calculate the input index, accounting for (left side) padding
                 // right side padding is inconsequential
-                int input_row = row + i - padding;
-                int input_col = col + j - padding;
+                int input_row = row + i;
+                int input_col = col + j;
 
                 int input_idx = input_row * i_w + input_col;
 
@@ -52,18 +51,12 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
                     // Update the max value if necessary
                     FLOATTYPE val = in[input_idx];
                     max_val = fmaxf(max_val, val);
-                    // printf("idx(row,col): (%d, %d); val: %f\n", input_row, input_col, val);
-                    // if (val > max_val)
-                    // {
-                    //     max_val = val;
-                    // }
                 }
             }
         }
 
         // Write the max value to the output
         int out_idx = row * o_w + col;
-        // printf("out_idx: %d; out_val:%f\n", out_idx, max_val);
         out[out_idx] = max_val;
     }
 }
@@ -192,7 +185,7 @@ void cudaMaxPooling(int padding, int c, int i_h, int i_w, int f_dim)
     // dim3 blockDim(TW, TH);
     // dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
     dim3 gridDim(1);
-    dim3 blockDim(32);
+    dim3 blockDim(192);
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {

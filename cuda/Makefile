@@ -20,5 +20,5 @@ archcpu:
 
 clean:
 	rm -f ./build/*
-	rm *.out
+	rm -f *.out
 
