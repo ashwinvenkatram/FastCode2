@@ -29,7 +29,7 @@ __global__ void integrated_kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out0, FL
     // if thread is accessing out-of-bounds, return
     if (row < 0 || row >= i_h || col < 0 || col >= i_w)
     {
-        return;
+        return; //make it compute redundant
     }
 
     // Iterate over the input channel dim
@@ -425,12 +425,15 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim)
         printf("CLOCK ERROR. Exiting.\n");
         std::exit(EXIT_FAILURE);
     }
+    
     CUDA_CALL(cudaMemcpy(gImage, cImage, imageSize, cudaMemcpyHostToDevice));
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
         std::exit(EXIT_FAILURE);
     }
+    
     printf("Copy host->dev %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
     // int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
@@ -447,7 +450,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim)
     
     kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
                                                             fw, fh, o_h, o_w, output_spatial_size);
-
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -462,6 +465,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim)
         std::exit(EXIT_FAILURE);
     }
     CUDA_CALL(cudaMemcpy(cOutImage, gOutImage, outImageSize, cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -510,7 +514,7 @@ FLOATTYPE cudaMaxPooling_Ref(int c, int h, int w, int f_dim)
     CUDA_CALL(cudaMalloc((void **)&gOutImage, outImageSize));
 
     CUDA_CALL(cudaMemset((void *)gOutImage, 0, outImageSize));
-
+    
     // Does not include padding
     fillImage_floattype(cImage, c, h, w);
 
@@ -524,7 +528,7 @@ FLOATTYPE cudaMaxPooling_Ref(int c, int h, int w, int f_dim)
     }
 
     CUDA_CALL(cudaMemcpy(gImage, cImage, imageSize, cudaMemcpyHostToDevice));
-    
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -543,7 +547,7 @@ FLOATTYPE cudaMaxPooling_Ref(int c, int h, int w, int f_dim)
     }
 
     cudaMaxPool_ref<<<gridDim, blockDim, shmem_size>>>(gOutImage, gImage, c, h, w, fw, fh);
-
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -558,6 +562,7 @@ FLOATTYPE cudaMaxPooling_Ref(int c, int h, int w, int f_dim)
         std::exit(EXIT_FAILURE);
     }
     CUDA_CALL(cudaMemcpy(cOutImage, gOutImage, outImageSize, cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
