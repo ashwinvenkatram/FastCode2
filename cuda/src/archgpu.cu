@@ -867,16 +867,16 @@ int main(int argc, char *argv[])
     if(CASE_SELECT == 0){
         printf("C:%d; H:%d; W:%d; F_dim:%d; padding:%d\n", C, H, W, F_dim, F_dim/ 2);
         for(int run=0; run < NUM_RUNS; run++){    
-            printf("Reference Max Pool Using cuDNN\n");
+            // printf("Reference Max Pool Using cuDNN\n");
             // internally handles padding logic
             FLOATTYPE ref_checksum = cudnnMaxPooling(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
             // FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
             
-            printf("FC2: Max Pool Using CUDA\n");
+            // printf("FC2: Max Pool Using CUDA\n");
             FLOATTYPE kernel_checksum = cudaMaxPooling(C, H, W, F_dim, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
 
             assert(ref_checksum == kernel_checksum);
-            printf("==============================\n\n");
+            // printf("==============================\n\n");
         }
 
         /*  Compute average */
