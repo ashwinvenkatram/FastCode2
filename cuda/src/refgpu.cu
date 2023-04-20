@@ -17,7 +17,7 @@
 
 #define H 13
 #define W 13
-#define C 1
+#define C 512
 
 #define FH 5
 #define FW 5
@@ -64,7 +64,7 @@ static double TimeSpecToSeconds(struct timespec *ts)
     return (double)ts->tv_sec + (double)ts->tv_nsec / 1000000000.0;
 }
 
-void fillImage(double *image, int c, int h, int w)
+void fillImage(float *image, int c, int h, int w)
 {
     for (int i = 0; i < c; i++)
     {
@@ -72,15 +72,15 @@ void fillImage(double *image, int c, int h, int w)
         {
             for (int k = 0; k < w; k++)
             {
-                image[i * h * w + j * w + k] = i * h * w + j * w + k;;
+                image[i * h * w + j * w + k] = i * h * w + j * w + k;
             }
         }
     }
 }
 
-double calculateChecksum(double *image, int c, int h, int w)
+float calculateChecksum(float *image, int c, int h, int w)
 {
-    double checksum = 0.0;
+    float checksum = 0.0;
     for (int i = 0; i < c; i++)
     {
         for (int j = 0; j < h; j++)
@@ -95,7 +95,7 @@ double calculateChecksum(double *image, int c, int h, int w)
     return checksum;
 }
 
-__global__ void cudaMaxPoolSimple(double *gOutImage, double *gImage, int c, int h, int w, int fw, int fh)
+__global__ void cudaMaxPoolSimple(float *gOutImage, float *gImage, int c, int h, int w, int fw, int fh)
 {
     // MaxPool without shared memory
 
@@ -115,12 +115,12 @@ __global__ void cudaMaxPoolSimple(double *gOutImage, double *gImage, int c, int 
         return;
     }
 
-    double maxValue = gImage[indexToOffset(0, 0, channel, heightOffset, widthOffset)];
+    float maxValue = gImage[indexToOffset(0, 0, channel, heightOffset, widthOffset)];
     for (int x = -fw / 2; x <= fw / 2; x++)
     {
         for (int y = -fh / 2; y <= fh / 2; y++)
         {
-            double value = 0.0;
+            float value = 0.0;
             if ((widthOffset + x) >= 0 && (widthOffset + x) < w && (heightOffset + y) >= 0 && (heightOffset + y) < h)
             {
                 value = gImage[indexToOffset(x, y, channel, heightOffset, widthOffset)];
@@ -137,7 +137,7 @@ __global__ void cudaMaxPoolSimple(double *gOutImage, double *gImage, int c, int 
 
 // dim3 blockDim(TW, TH);
 // dim3 gridDim(DIV_RUP(w, TW), DIV_RUP(h, TH), c);
-__global__ void cudaMaxPool(double *gOutImage, double *gImage, int c, int h, int w, int fw, int fh)
+__global__ void cudaMaxPool(float *gOutImage, float *gImage, int c, int h, int w, int fw, int fh)
 {
     // Tile size
     int tw = blockDim.x;
@@ -147,7 +147,7 @@ __global__ void cudaMaxPool(double *gOutImage, double *gImage, int c, int h, int
     int pTW = tw + fw - 1;
     int pTH = th + fh - 1;
 
-    extern __shared__ double shmem[];
+    extern __shared__ float shmem[];
 
     // Tile offsets in image. Without Padding
     int tileWidthOffset = tw * blockIdx.x;
@@ -185,12 +185,12 @@ __global__ void cudaMaxPool(double *gOutImage, double *gImage, int c, int h, int
         return;
     }
 
-    double maxValue = shmem[shmem_offset(threadIdx.x, threadIdx.y, 0, 0, pTW, fw / 2, fh / 2)];
+    float maxValue = shmem[shmem_offset(threadIdx.x, threadIdx.y, 0, 0, pTW, fw / 2, fh / 2)];
     for (int x = -fw / 2; x <= fw / 2; x++)
     {
         for (int y = -fh / 2; y <= fh / 2; y++)
         {
-            double value = shmem[shmem_offset(x, y, threadIdx.x, threadIdx.y, pTW, fw / 2, fh / 2)];
+            float value = shmem[shmem_offset(x, y, threadIdx.x, threadIdx.y, pTW, fw / 2, fh / 2)];
             if (value > maxValue)
             {
                 maxValue = value;
@@ -203,16 +203,16 @@ __global__ void cudaMaxPool(double *gOutImage, double *gImage, int c, int h, int
 
 void cudaMaxPooling(int c, int h, int w, int fw, int fh)
 {
-    long int imageSize = sizeof(double) * c * w * h;
+    long int imageSize = sizeof(float) * c * w * h;
 
-    double *cImage = (double *)malloc(imageSize);
-    double *gImage;
+    float *cImage = (float *)malloc(imageSize);
+    float *gImage;
 
     // TODO: Change as per stride.
-    long int outImageSize = sizeof(double) * c * w * h; // DIV_RUP(W, FW) * DIV_RUP(H, fh);
+    long int outImageSize = sizeof(float) * c * w * h; // DIV_RUP(W, FW) * DIV_RUP(H, fh);
 
-    double *cOutImage = (double *)malloc(outImageSize);
-    double *gOutImage;
+    float *cOutImage = (float *)malloc(outImageSize);
+    float *gOutImage;
 
     struct timespec start, end;
 
@@ -249,7 +249,7 @@ void cudaMaxPooling(int c, int h, int w, int fw, int fh)
     // CUDA_CALL(cudaGetLastError());
     // printf("Time cuda code %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
-    int shmem_size = sizeof(double) * (TW + FW - 1) * (TH + FH - 1);
+    int shmem_size = sizeof(float) * (TW + FW - 1) * (TH + FH - 1);
     dim3 blockDim(TW, TH);
     dim3 gridDim(DIV_RUP(w, TW), DIV_RUP(h, TH), c);
 
@@ -290,16 +290,16 @@ void cudaMaxPooling(int c, int h, int w, int fw, int fh)
 
 void cudaMaxPoolingSimple(int c, int h, int w, int fw, int fh)
 {
-    long int imageSize = sizeof(double) * c * w * h;
+    long int imageSize = sizeof(float) * c * w * h;
 
-    double *cImage = (double *)malloc(imageSize);
-    double *gImage;
+    float *cImage = (float *)malloc(imageSize);
+    float *gImage;
 
     // TODO: Change as per stride.
-    long int outImageSize = sizeof(double) * c * w * h; // DIV_RUP(W, FW) * DIV_RUP(H, fh);
+    long int outImageSize = sizeof(float) * c * w * h; // DIV_RUP(W, FW) * DIV_RUP(H, fh);
 
-    double *cOutImage = (double *)malloc(outImageSize);
-    double *gOutImage;
+    float *cOutImage = (float *)malloc(outImageSize);
+    float *gOutImage;
 
     struct timespec start, end;
 
@@ -377,16 +377,16 @@ void cudaMaxPoolingSimple(int c, int h, int w, int fw, int fh)
 
 void cudnnMaxPooling(int c, int h, int w, int fw, int fh)
 {
-    long int imageSize = sizeof(double) * c * w * h;
+    long int imageSize = sizeof(float) * c * w * h;
 
-    double *cImage = (double *)malloc(imageSize);
-    double *gImage;
+    float *cImage = (float *)malloc(imageSize);
+    float *gImage;
 
     // TODO: Change as per stride.
-    long int outImageSize = sizeof(double) * c * w * h; // DIV_RUP(w, fw) * DIV_RUP(h, fh);
+    long int outImageSize = sizeof(float) * c * w * h; // DIV_RUP(w, fw) * DIV_RUP(h, fh);
 
-    double *cOutImage = (double *)malloc(outImageSize);
-    double *gOutImage;
+    float *cOutImage = (float *)malloc(outImageSize);
+    float *gOutImage;
 
     struct timespec start, end;
 
@@ -436,7 +436,7 @@ void cudnnMaxPooling(int c, int h, int w, int fw, int fh)
     // initialize input data descriptor
     checkCUDNN(cudnnSetTensor4dDescriptor(in_desc,           // descriptor handle
                                           CUDNN_TENSOR_NCHW, // data format
-                                          CUDNN_DATA_DOUBLE, // data type (precision)
+                                          CUDNN_DATA_FLOAT, // data type (precision)
                                           1,                 // number of images
                                           c,                 // number of channels
                                           h,                 // data height
@@ -448,15 +448,15 @@ void cudnnMaxPooling(int c, int h, int w, int fw, int fh)
     // initialize output data descriptor
     checkCUDNN(cudnnSetTensor4dDescriptor(out_desc,          // descriptor handle
                                           CUDNN_TENSOR_NCHW, // data format
-                                          CUDNN_DATA_DOUBLE, // data type (precision)
+                                          CUDNN_DATA_FLOAT, // data type (precision)
                                           1,                 // number of images
                                           c,                 // number of channels
                                           h,                 // data height
                                           w));               // data width
 
     // Scaling factor
-    double alpha = 1.0;
-    double beta = 0.0;
+    float alpha = 1.0;
+    float beta = 0.0;
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -493,7 +493,7 @@ void cudnnMaxPooling(int c, int h, int w, int fw, int fh)
     printf("Copy dev->host %lf sec\n", TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start));
 
     printf("CUDNN O = checksum: %lf\n", calculateChecksum(cOutImage, c, h, w));
-
+    
     free(cImage);
     free(cOutImage);
     CUDA_CALL(cudaFree(gImage));

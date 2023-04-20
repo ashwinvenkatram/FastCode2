@@ -759,8 +759,8 @@ FLOATTYPE cudnnMaxPooling(int c, int h, int w, int f_dim,
                                           w));               // data width
 
     // Scaling factor
-    double alpha = 1.0;
-    double beta = 0.0;
+    FLOATTYPE alpha = 1.0;
+    FLOATTYPE beta = 0.0;
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -808,8 +808,6 @@ FLOATTYPE cudnnMaxPooling(int c, int h, int w, int f_dim,
     #endif
 
     FLOATTYPE output_checksum = calculateChecksum_float(cOutImage, c, h, w);
-    printf("Output tensor:\n");
-    print_tensor(cOutImage, c, h, w);
 
     #ifdef PRINT_PER_RUN
         printf("CUDNN O = checksum: %lf\n", output_checksum);
@@ -869,19 +867,16 @@ int main(int argc, char *argv[])
     if(CASE_SELECT == 0){
         printf("C:%d; H:%d; W:%d; F_dim:%d; padding:%d\n", C, H, W, F_dim, F_dim/ 2);
         for(int run=0; run < NUM_RUNS; run++){    
-            // printf("Reference Max Pool Using CUDA\n");
+            printf("Reference Max Pool Using cuDNN\n");
             // internally handles padding logic
-            // FLOATTYPE ref_checksum = cudnnMaxPooling(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
-            // printf("\n");
-            FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
-            // FLOATTYPE kernel_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
-            // printf("FC2: Max Pool Using CUDA\n");
-            // requires padding as input & perform correction
-            // (int padding, int c, int i_h, int i_w, int fw, int fh)
+            FLOATTYPE ref_checksum = cudnnMaxPooling(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
+            // FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
+            
+            printf("FC2: Max Pool Using CUDA\n");
             FLOATTYPE kernel_checksum = cudaMaxPooling(C, H, W, F_dim, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
 
             assert(ref_checksum == kernel_checksum);
-            // printf("==============================\n\n");
+            printf("==============================\n\n");
         }
 
         /*  Compute average */
@@ -932,7 +927,7 @@ int main(int argc, char *argv[])
             for(int dim_iter=0; dim_iter< 3; dim_iter++){
                 double D2H_ref_local = 0.0;
                 double H2D_ref_local = 0.0;
-                ref_checksum_arr[dim_iter] = cudaMaxPooling_Ref(C, H, W, F_dim_arr[dim_iter], sum_ref, H2D_ref_local, D2H_ref_local, timing_arr_ref + run);
+                ref_checksum_arr[dim_iter] = cudnnMaxPooling(C, H, W, F_dim_arr[dim_iter], sum_ref, H2D_ref_local, D2H_ref_local, timing_arr_ref + run);
                 D2H_ref += D2H_ref_local;
                 H2D_ref += H2D_ref_local;
             }
