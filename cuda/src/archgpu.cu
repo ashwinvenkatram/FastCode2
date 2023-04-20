@@ -1,5 +1,6 @@
 #include <iostream>
 #include <float.h>
+#include <cudnn.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -299,7 +300,7 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
         std::exit(EXIT_FAILURE);
     }
     CUDA_CALL(cudaMemcpy(gImage, cImage, imageSize, cudaMemcpyHostToDevice));
-
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -325,7 +326,8 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
     }
     
     // integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
-    //                                                         fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size0);
+                                                            // fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size0);
+    
     kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, c, i_h, i_w, input_spatial_size, 
                                                 fw0, fh0, o_h0, o_w0, output_spatial_size0);
     
@@ -333,14 +335,17 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
                                                 fw1, fh1, o_h0, o_w0, output_spatial_size0);
 
     kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage2, c, i_h, i_w, input_spatial_size, 
-                                                fw2, fh2, o_h0, o_w0, output_spatial_size0);                                                
+                                                fw2, fh2, o_h0, o_w0, output_spatial_size0);
+    cudaDeviceSynchronize();                                          
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
         std::exit(EXIT_FAILURE);
     }
+    
     CUDA_CALL(cudaGetLastError());
     kernel_time = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+
     #ifdef PRINT_PER_RUN
         printf("Time cuda code %lf sec\n", kernel_time);
     #endif
@@ -353,7 +358,7 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
     CUDA_CALL(cudaMemcpy(cOutImage0, gOutImage0, outImageSize0, cudaMemcpyDeviceToHost));
     CUDA_CALL(cudaMemcpy(cOutImage1, gOutImage1, outImageSize0, cudaMemcpyDeviceToHost));
     CUDA_CALL(cudaMemcpy(cOutImage2, gOutImage2, outImageSize0, cudaMemcpyDeviceToHost));
-
+    cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
         printf("CLOCK ERROR. Exiting.\n");
@@ -659,6 +664,175 @@ FLOATTYPE cudaMaxPooling_Ref(int c, int h, int w, int f_dim, double &sum, double
 }
 
 
+FLOATTYPE cudnnMaxPooling(int c, int h, int w, int f_dim,
+                    double &sum, double &H2D_time, double &D2H_time, double *timing_arr)
+{
+    double kernel_time = 0.0;
+    int fw = f_dim;
+    int fh = f_dim;
+
+    long int imageSize = sizeof(FLOATTYPE) * c * w * h;
+
+    FLOATTYPE *cImage = (FLOATTYPE *)malloc(imageSize);
+    FLOATTYPE *gImage;
+
+    // TODO: Change as per stride.
+    long int outImageSize = sizeof(FLOATTYPE) * c * w * h; // DIV_RUP(w, fw) * DIV_RUP(h, fh);
+
+    FLOATTYPE *cOutImage = (FLOATTYPE *)malloc(outImageSize);
+    FLOATTYPE *gOutImage;
+
+    struct timespec start, end;
+
+    CUDA_CALL(cudaMalloc((void **)&gImage, imageSize));
+    CUDA_CALL(cudaMalloc((void **)&gOutImage, outImageSize));
+
+    CUDA_CALL(cudaMemset(gOutImage, 0, outImageSize));
+
+    fillImage_floattype(cImage, c, h, w);
+
+    #ifdef PRINT_PER_RUN
+        printf("I = checksum: %lf\n", calculateChecksum_float(cImage, c, h, w));
+    #endif
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+    
+    CUDA_CALL(cudaMemcpy(gImage, cImage, imageSize, cudaMemcpyHostToDevice));
+    cudaDeviceSynchronize();
+    
+    if (clock_gettime(CLOCK_MONOTONIC, &end))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+    
+    H2D_time = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+    
+    #ifdef PRINT_PER_RUN
+        printf("Copy host->dev %lf sec\n", H2D_time);
+    #endif
+
+    cudnnHandle_t cudnn;
+    checkCUDNN(cudnnCreate(&cudnn));
+
+    cudnnPoolingDescriptor_t pooling_desc;
+    // create descriptor handle
+    checkCUDNN(cudnnCreatePoolingDescriptor(&pooling_desc));
+
+    // initialize descriptor
+    checkCUDNN(cudnnSetPooling2dDescriptor(pooling_desc,            // descriptor handle
+                                           CUDNN_POOLING_MAX,       // mode - max pooling
+                                           CUDNN_NOT_PROPAGATE_NAN, // NaN propagation mode
+                                           fh,                      // window height
+                                           fw,                      // window width
+                                           fh / 2,                  // vertical padding
+                                           fw / 2,                  // horizontal padding
+                                           1,                       // vertical stride
+                                           1));                     // horizontal stride
+
+    cudnnTensorDescriptor_t in_desc;
+    // create input data tensor descriptor
+    checkCUDNN(cudnnCreateTensorDescriptor(&in_desc));
+    // initialize input data descriptor
+    checkCUDNN(cudnnSetTensor4dDescriptor(in_desc,           // descriptor handle
+                                          CUDNN_TENSOR_NCHW, // data format
+                                          CUDNN_DATA_FLOAT, // data type (precision)
+                                          1,                 // number of images
+                                          c,                 // number of channels
+                                          h,                 // data height
+                                          w));               // data width
+
+    cudnnTensorDescriptor_t out_desc;
+    // create output data tensor descriptor
+    checkCUDNN(cudnnCreateTensorDescriptor(&out_desc));
+    // initialize output data descriptor
+    checkCUDNN(cudnnSetTensor4dDescriptor(out_desc,          // descriptor handle
+                                          CUDNN_TENSOR_NCHW, // data format
+                                          CUDNN_DATA_FLOAT, // data type (precision)
+                                          1,                 // number of images
+                                          c,                 // number of channels
+                                          h,                 // data height
+                                          w));               // data width
+
+    // Scaling factor
+    double alpha = 1.0;
+    double beta = 0.0;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+    // Call pooling operator
+    checkCUDNN(cudnnPoolingForward(cudnn,        // cuDNN context handle
+                                   pooling_desc, // pooling descriptor handle
+                                   &alpha,       // alpha scaling factor
+                                   in_desc,      // input tensor descriptor
+                                   gImage,       // input data pointer to GPU memory
+                                   &beta,        // beta scaling factor
+                                   out_desc,     // output tensor descriptor
+                                   gOutImage));  // output data pointer from GPU memory
+    cudaDeviceSynchronize();
+    if (clock_gettime(CLOCK_MONOTONIC, &end))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+    kernel_time = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+    #ifdef PRINT_PER_RUN
+        printf("Time cudnn code %lf sec\n", kernel_time);
+    #endif
+
+    if (clock_gettime(CLOCK_MONOTONIC, &start))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    CUDA_CALL(cudaMemcpy(cOutImage, gOutImage, outImageSize, cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
+    
+    if (clock_gettime(CLOCK_MONOTONIC, &end))
+    {
+        printf("CLOCK ERROR. Exiting.\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    D2H_time = TimeSpecToSeconds(&end) - TimeSpecToSeconds(&start);
+    #ifdef PRINT_PER_RUN
+        printf("Copy dev->host %lf sec\n", D2H_time);
+    #endif
+
+    FLOATTYPE output_checksum = calculateChecksum_float(cOutImage, c, h, w);
+    printf("Output tensor:\n");
+    print_tensor(cOutImage, c, h, w);
+
+    #ifdef PRINT_PER_RUN
+        printf("CUDNN O = checksum: %lf\n", output_checksum);
+    #endif
+
+    free(cImage);
+    free(cOutImage);
+    CUDA_CALL(cudaFree(gImage));
+    CUDA_CALL(cudaFree(gOutImage));
+
+    cudnnDestroyTensorDescriptor(in_desc);
+    cudnnDestroyTensorDescriptor(out_desc);
+    cudnnDestroyPoolingDescriptor(pooling_desc);
+    cudnnDestroy(cudnn);
+
+    // update timing
+    sum += kernel_time;
+    *timing_arr = kernel_time;
+
+    return output_checksum;
+}
+
+
 int main(int argc, char *argv[])
 {
     int C = atoi(argv[1]);
@@ -697,9 +871,10 @@ int main(int argc, char *argv[])
         for(int run=0; run < NUM_RUNS; run++){    
             // printf("Reference Max Pool Using CUDA\n");
             // internally handles padding logic
-            FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
+            // FLOATTYPE ref_checksum = cudnnMaxPooling(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
             // printf("\n");
-
+            FLOATTYPE ref_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_ref, H2D_ref, D2H_ref, timing_arr_ref + run);
+            // FLOATTYPE kernel_checksum = cudaMaxPooling_Ref(C, H, W, F_dim, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
             // printf("FC2: Max Pool Using CUDA\n");
             // requires padding as input & perform correction
             // (int padding, int c, int i_h, int i_w, int fw, int fh)
