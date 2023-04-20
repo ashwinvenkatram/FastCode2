@@ -18,7 +18,7 @@ archgpu:
 	# ./build/archgpu 512 13 13 5 100 0
 	# ./build/archgpu 512 13 13 9 100 0
 	# ./build/archgpu 512 13 13 13 100 0
-	./build/archgpu 512 13 13 13 1 1
+	# ./build/archgpu 512 13 13 13 1 1
 
 inline_maxpool_integrated:
 	$(CUDA_COMPILER) -o build/maxpool_integrated $(SRC_DIR)maxpool_integrated.cu -lcublas -lcudnn

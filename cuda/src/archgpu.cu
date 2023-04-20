@@ -18,10 +18,10 @@ __global__ void integrated_kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out0, FL
     // 1: f_dim 9
     // 2: f_dim 13
 
-    // Determine the thread and block index
-    int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-
-    // Outer loop un-necessary; tidx implicitly account for the centre of the receptive field
+    // Spatial access index
+    int tidx = threadIdx.x;
+    // Channel dim access
+    int c_iter = blockIdx.x;
     
     // Calculate the spatial row and column index
     // invariant to channel iteration
@@ -34,55 +34,58 @@ __global__ void integrated_kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out0, FL
         return; //make it compute redundant
     }
 
-    // Iterate over the input channel dim
-    for (int c_iter = 0; c_iter < c; c_iter++){
+    // Declare shared memory
+    extern __shared__ FLOATTYPE smem[];
 
-        // Initialize the max value to the minimum float value
-        FLOATTYPE max_val0 = 0.0;
-        FLOATTYPE max_val1 = 0.0;
-        FLOATTYPE max_val2 = 0.0;
+    int input_channel_offset = c_iter * input_spatial_size;
+    int output_channel_offset = c_iter * output_spatial_size;
 
-        int input_channel_offset = c_iter * input_spatial_size;
-        int output_channel_offset = c_iter * output_spatial_size;
+    // Calculate the input index
+    int input_idx = input_channel_offset + row * i_w + col;
 
-        // Iterate over the pooling window
-        for (int i = -f_w2 / 2; i <= f_w2 / 2; i++) {
-            for (int j = -f_h2 / 2; j <= f_h2 / 2; j++) {
-                // Calculate the input index, accounting for (left side) padding
-                // right side padding is inconsequential
-                int input_row = row + i;
-                int input_col = col + j;
+    // Load input data into shared memory
+    smem[tidx] = in[input_idx];
+    __syncthreads();
+
+    // Initialize the max value to the minimum float value
+    FLOATTYPE max_val0 = -FLT_MAX;
+    FLOATTYPE max_val1 = -FLT_MAX;
+    FLOATTYPE max_val2 = -FLT_MAX;
+
+    // Iterate over the pooling window
+    for (int i = -f_w2 / 2; i <= f_w2 / 2; i++) {
+        for (int j = -f_h2 / 2; j <= f_h2 / 2; j++) {
+            // Calculate the shmem access index
+            int smem_row = row + i;
+            int smem_col = col + j;
+            int smem_idx = smem_row * i_w + smem_col;
+
+            // Check if the shared memory index is valid
+            if (smem_row >= 0 && smem_row < i_h &&
+                smem_col >= 0 && smem_col < i_w)
+            {
+                // Update the max value if necessary
+                FLOATTYPE val = smem[smem_idx];
+                max_val2 = fmaxf(max_val2, val);
                 
-                // Check if the input index is valid to sub-tensor
-                // clamp the index to the range of the input matrix
-                // else encroaches into previous tensor
-                if (input_row >= 0 && input_row < i_h &&
-                    input_col >= 0 && input_col < i_w)
-                {
-                    int input_idx = input_channel_offset + input_row * i_w + input_col;
-                    // Update the max value if necessary
-                    FLOATTYPE val = in[input_idx];
-                    max_val2 = fmaxf(max_val2, val);
-                    
-                    if(i <=f_w0/2 && j <=f_h0/2){
-                        // valid to update max_val0, max_val1
-                        max_val0 = fmaxf(max_val0, val);
-                        max_val1 = fmaxf(max_val1, val);
-                    }
-                    else if(i <=f_w1/2 && j <=f_h1/2){
-                        // valid to update max_val1
-                        max_val1 = fmaxf(max_val1, val);
-                    }
+                if(i <=f_w0/2 && j <=f_h0/2){
+                    // valid to update max_val0, max_val1
+                    max_val0 = fmaxf(max_val0, val);
+                    max_val1 = fmaxf(max_val1, val);
+                }
+                else if(i <=f_w1/2 && j <=f_h1/2){
+                    // valid to update max_val1
+                    max_val1 = fmaxf(max_val1, val);
                 }
             }
         }
-
-        // Write the max value to the output
-        int out_idx = output_channel_offset + row * o_w + col;
-        out0[out_idx] = max_val0;
-        out1[out_idx] = max_val1;
-        out2[out_idx] = max_val2;
     }
+
+    // Write the max value to the output
+    int out_idx = output_channel_offset + row * o_w + col;
+    out0[out_idx] = max_val0;
+    out1[out_idx] = max_val1;
+    out2[out_idx] = max_val2;
 }
 
 
@@ -90,10 +93,10 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
                                     int i_h, int i_w, int input_spatial_size,
                                     int f_w, int f_h, int o_h, int o_w, int output_spatial_size)
 {
-    // Determine the thread and block index
-    int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-
-    // Outer loop un-necessary; tidx implicitly account for the centre of the receptive field
+    // Spatial access index
+    int tidx = threadIdx.x;
+    // Channel dim access
+    int c_iter = blockIdx.x;
     
     // Calculate the spatial row and column index
     // invariant to channel iteration
@@ -106,41 +109,44 @@ __global__ void kernel_max_pooling(FLOATTYPE *in, FLOATTYPE *out, int c,
         return;
     }
 
-    // Iterate over the input channel dim
-    for (int c_iter = 0; c_iter < c; c_iter++){
+    // Declare shared memory
+    extern __shared__ FLOATTYPE smem[];
 
-        // Initialize the max value to the minimum float value
-        FLOATTYPE max_val = 0.0;
+    int input_channel_offset = c_iter * input_spatial_size;
+    int output_channel_offset = c_iter * output_spatial_size;
 
-        int input_channel_offset = c_iter * input_spatial_size;
-        int output_channel_offset = c_iter * output_spatial_size;
+    // Calculate the input index
+    int input_idx = input_channel_offset + row * i_w + col;
 
-        // Iterate over the pooling window
-        for (int i = -f_w / 2; i <= f_w / 2; i++) {
-            for (int j = -f_h / 2; j <= f_h / 2; j++) {
-                // Calculate the input index, accounting for (left side) padding
-                // right side padding is inconsequential
-                int input_row = row + i;
-                int input_col = col + j;
-                
-                // Check if the input index is valid to sub-tensor
-                // clamp the index to the range of the input matrix
-                // else encroaches into previous tensor
-                if (input_row >= 0 && input_row < i_h &&
-                    input_col >= 0 && input_col < i_w)
-                {
-                    int input_idx = input_channel_offset + input_row * i_w + input_col;
-                    // Update the max value if necessary
-                    FLOATTYPE val = in[input_idx];
-                    max_val = fmaxf(max_val, val);
-                }
+    // Load input data into shared memory
+    smem[tidx] = in[input_idx];
+    __syncthreads();
+
+    // Initialize the max value to the minimum float value
+    FLOATTYPE max_val = -FLT_MAX;
+
+    // Iterate over the pooling window
+    for (int i = -f_w / 2; i <= f_w / 2; i++) {
+        for (int j = -f_h / 2; j <= f_h / 2; j++) {
+            // Calculate the shared memory index
+            int smem_row = row + i;
+            int smem_col = col + j;
+            int smem_idx = smem_row * i_w + smem_col;
+            
+            // Check if the shared memory index is valid
+            if (smem_row >= 0 && smem_row < i_h &&
+                smem_col >= 0 && smem_col < i_w)
+            {
+                // Update the max value if necessary
+                FLOATTYPE val = smem[smem_idx];
+                max_val = fmaxf(max_val, val);
             }
         }
-
-        // Write the max value to the output
-        int out_idx = output_channel_offset + row * o_w + col;
-        out[out_idx] = max_val;
     }
+
+    // Write the max value to the output
+    int out_idx = output_channel_offset + row * o_w + col;
+    out[out_idx] = max_val;
 }
 
 
@@ -306,11 +312,7 @@ FLOATTYPE cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, double &
         printf("Copy host->dev %lf sec\n", H2D_time);
     #endif
 
-    // int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
-    // dim3 blockDim(TW, TH);
-    // dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
-    dim3 gridDim(1);
-    dim3 blockDim(192);
+    int shmem_size = sizeof(FLOATTYPE) * input_spatial_size;
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -318,7 +320,14 @@ FLOATTYPE cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, double &
         std::exit(EXIT_FAILURE);
     }
     
-    integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
+    // kernel_max_pooling<<<c, output_spatial_size, shmem_size>>>(gImage, gOutImage0, c, i_h, i_w, input_spatial_size, 
+    //                                                         fw0, fh0, o_h0, o_w0, output_spatial_size);
+    // kernel_max_pooling<<<c, output_spatial_size, shmem_size>>>(gImage, gOutImage1, c, i_h, i_w, input_spatial_size, 
+    //                                                         fw1, fh1, o_h0, o_w0, output_spatial_size);
+    // kernel_max_pooling<<<c, output_spatial_size, shmem_size>>>(gImage, gOutImage2, c, i_h, i_w, input_spatial_size, 
+    //                                                         fw2, fh2, o_h0, o_w0, output_spatial_size);
+
+    integrated_kernel_max_pooling<<<c, output_spatial_size, shmem_size>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
                                                             fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size);
     
     cudaDeviceSynchronize();                                          
@@ -457,11 +466,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim, double &sum, double
         printf("Copy host->dev %lf sec\n", H2D_time);
     #endif
 
-    // int shmem_size = sizeof(FLOATTYPE) * (TW + fw - 1) * (TH + fh - 1);
-    // dim3 blockDim(TW, TH);
-    // dim3 gridDim(DIV_RUP(i_w, TW), DIV_RUP(i_h, TH), c);
-    dim3 gridDim(1);
-    dim3 blockDim(192);
+    int shmem_size = sizeof(FLOATTYPE) * input_spatial_size;
 
     if (clock_gettime(CLOCK_MONOTONIC, &start))
     {
@@ -469,7 +474,7 @@ FLOATTYPE cudaMaxPooling(int c, int i_h, int i_w, int f_dim, double &sum, double
         std::exit(EXIT_FAILURE);
     }
     
-    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
+    kernel_max_pooling<<<c, input_spatial_size, shmem_size>>>(gImage, gOutImage, c, i_h, i_w, input_spatial_size, 
                                                             fw, fh, o_h, o_w, output_spatial_size);
     cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
