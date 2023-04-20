@@ -209,10 +209,13 @@ __global__ void cudaMaxPool_ref(FLOATTYPE *gOutImage, FLOATTYPE *gImage, int c, 
     gOutImage[indexToOffset(0, 0, channel, h, w, heightOffset, widthOffset)] = maxValue;
 }
 
-
-void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *out_checksum_arr, double &sum, double &H2D_time, double &D2H_time, double *timing_arr)
+/**
+ * Designed for integrated 3 max-pool kernels together
+*/
+FLOATTYPE cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, double &sum, double &H2D_time, double &D2H_time, double *timing_arr)
 {   
     double kernel_time = 0.0;
+    int NUM_KERNELS = 3;
 
     int fw0 = f_dim[0];
     int fh0 = f_dim[0];
@@ -253,37 +256,27 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
     int o_h2 = ((i_h + 2 * p_h2 - fh2) / s_h) + 1;
     int o_w2 = ((i_w + 2 * p_w2 - fw2) / s_w) + 1;
 
-    #ifdef PRINT_PER_RUN
-        printf("output0 dims: %d, %d\n", o_h0, o_w0);
-        printf("output1 dims: %d, %d\n", o_h1, o_w1);
-        printf("output2 dims: %d, %d\n", o_h2, o_w2);
-    #endif
     // ensure that all output spatial dimensions are equal
     // Requirement for kernel design
     assert(o_h0==o_h1 && o_h1==o_h2);
     assert(o_w0==o_w1 && o_w1==o_w2);
 
-    int output_spatial_size0 = o_w0 * o_h0;
-    long int outImageSize0 = sizeof(FLOATTYPE) * c * output_spatial_size0;
-    
-    FLOATTYPE *cOutImage0 = (FLOATTYPE *)malloc(outImageSize0);
-    FLOATTYPE *cOutImage1 = (FLOATTYPE *)malloc(outImageSize0);
-    FLOATTYPE *cOutImage2 = (FLOATTYPE *)malloc(outImageSize0);
-    
-    FLOATTYPE *gOutImage0;
-    FLOATTYPE *gOutImage1;
-    FLOATTYPE *gOutImage2;
+    int output_spatial_size = o_w0 * o_h0;
+    long int outImageSize = sizeof(FLOATTYPE) * NUM_KERNELS * c * output_spatial_size;
+    FLOATTYPE *cOutImage = (FLOATTYPE *)malloc(outImageSize);
+    FLOATTYPE *gOutImage;
     
     struct timespec start, end;
 
     CUDA_CALL(cudaMalloc((void **)&gImage, imageSize));
-    CUDA_CALL(cudaMalloc((void **)&gOutImage0, outImageSize0));
-    CUDA_CALL(cudaMalloc((void **)&gOutImage1, outImageSize0));
-    CUDA_CALL(cudaMalloc((void **)&gOutImage2, outImageSize0));
+    CUDA_CALL(cudaMalloc((void **)&gOutImage, outImageSize));
 
-    CUDA_CALL(cudaMemset((void *)gOutImage0, 0, outImageSize0));
-    CUDA_CALL(cudaMemset((void *)gOutImage1, 0, outImageSize0));
-    CUDA_CALL(cudaMemset((void *)gOutImage2, 0, outImageSize0));
+    CUDA_CALL(cudaMemset((void *)gOutImage, 0, outImageSize));
+
+    // Maintaining output tensor pointer to single malloc'ed block
+    FLOATTYPE *gOutImage0 = gOutImage;
+    FLOATTYPE *gOutImage1 = gOutImage + (c * output_spatial_size);
+    FLOATTYPE *gOutImage2 = gOutImage1 + (c * output_spatial_size);
 
     // Does not include padding
     fillImage_floattype(cImage, c, i_h, i_w);
@@ -325,17 +318,9 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
         std::exit(EXIT_FAILURE);
     }
     
-    // integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
-                                                            // fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size0);
+    integrated_kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, gOutImage1, gOutImage2, c, i_h, i_w, input_spatial_size, 
+                                                            fw0, fh0, fw1, fh1, fw2, fh2, o_h0, o_w0, output_spatial_size);
     
-    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage0, c, i_h, i_w, input_spatial_size, 
-                                                fw0, fh0, o_h0, o_w0, output_spatial_size0);
-    
-    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage1, c, i_h, i_w, input_spatial_size, 
-                                                fw1, fh1, o_h0, o_w0, output_spatial_size0);
-
-    kernel_max_pooling<<<gridDim, blockDim>>>(gImage, gOutImage2, c, i_h, i_w, input_spatial_size, 
-                                                fw2, fh2, o_h0, o_w0, output_spatial_size0);
     cudaDeviceSynchronize();                                          
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
@@ -355,9 +340,8 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
         printf("CLOCK ERROR. Exiting.\n");
         std::exit(EXIT_FAILURE);
     }
-    CUDA_CALL(cudaMemcpy(cOutImage0, gOutImage0, outImageSize0, cudaMemcpyDeviceToHost));
-    CUDA_CALL(cudaMemcpy(cOutImage1, gOutImage1, outImageSize0, cudaMemcpyDeviceToHost));
-    CUDA_CALL(cudaMemcpy(cOutImage2, gOutImage2, outImageSize0, cudaMemcpyDeviceToHost));
+
+    CUDA_CALL(cudaMemcpy(cOutImage, gOutImage, outImageSize, cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
     if (clock_gettime(CLOCK_MONOTONIC, &end))
     {
@@ -370,19 +354,18 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
         printf("Copy dev->host %lf sec\n",D2H_time);
     #endif
 
-    FLOATTYPE output_checksum0 = calculateChecksum_float(cOutImage0, c, o_h0, o_w0);
-    FLOATTYPE output_checksum1 = calculateChecksum_float(cOutImage1, c, o_h0, o_w0);
-    FLOATTYPE output_checksum2 = calculateChecksum_float(cOutImage2, c, o_h0, o_w0);
+    // Verify results for each subtensor
+    FLOATTYPE output_checksum0 = calculateChecksum_float(cOutImage, c, o_h0, o_w0);
+    FLOATTYPE output_checksum1 = calculateChecksum_float(cOutImage + (c * output_spatial_size), c, o_h0, o_w0);
+    FLOATTYPE output_checksum2 = calculateChecksum_float(cOutImage + 2*(c * output_spatial_size), c, o_h0, o_w0);
 
     #ifdef PRINT_PER_RUN
         printf("CUDA O = checksum: %f\n", output_checksum0);
         printf("CUDA O = checksum: %f\n", output_checksum1);
         printf("CUDA O = checksum: %f\n", output_checksum2);
     #endif
-    
-    out_checksum_arr[0] = output_checksum0;
-    out_checksum_arr[1] = output_checksum1;
-    out_checksum_arr[2] = output_checksum2;
+
+    FLOATTYPE output_checksum = output_checksum0 + output_checksum1 + output_checksum2;
 
     #ifdef PRINT_DEBUG
         printf("Input tensor:\n");
@@ -396,13 +379,12 @@ void cudaMaxPoolingIntegrated(int c, int i_h, int i_w, int* f_dim, FLOATTYPE *ou
     *timing_arr = kernel_time;
 
     free(cImage);
-    free(cOutImage0);
-    free(cOutImage1);
-    free(cOutImage2);
+    free(cOutImage);
+    
     CUDA_CALL(cudaFree(gImage));
-    CUDA_CALL(cudaFree(gOutImage0));
-    CUDA_CALL(cudaFree(gOutImage1));
-    CUDA_CALL(cudaFree(gOutImage2));
+    CUDA_CALL(cudaFree(gOutImage));
+    
+    return output_checksum;
 }
 
 
@@ -913,8 +895,8 @@ int main(int argc, char *argv[])
 
     }
     else if(CASE_SELECT == 1){
+        printf("Profile Integrated case\n");
         FLOATTYPE ref_checksum_arr[3] = {0.0, 0.0, 0.0};
-        FLOATTYPE kernel_checksum_arr[3] = {0.0, 0.0, 0.0};
 
         int F_dim_arr[3] = {5, 9, 13};
 
@@ -934,17 +916,13 @@ int main(int argc, char *argv[])
 
             // printf("==============================\n\n");
             // printf("Integrated Max Pool\n");
-            cudaMaxPoolingIntegrated(C, H, W, F_dim_arr, kernel_checksum_arr, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
+            FLOATTYPE kernel_checksum = cudaMaxPoolingIntegrated(C, H, W, F_dim_arr, sum_kernel, H2D_kernel, D2H_kernel, timing_arr_kernel + run);
             
-            #ifdef PRINT_PER_RUN
-                for(int dim_iter=0; dim_iter< 3; dim_iter++){
-                    if(ref_checksum_arr[dim_iter] == kernel_checksum_arr[dim_iter]){
-                        printf("Kernel: %d\t PASS\n", F_dim_arr[dim_iter]);
-                    } else{
-                        printf("Kernel: %d\t FAIL\n", F_dim_arr[dim_iter]);
-                    }
-                }
-            #endif
+            FLOATTYPE ref_checksum_cumm = 0.0;
+            for(int dim_iter=0; dim_iter< 3; dim_iter++){
+                ref_checksum_cumm += ref_checksum_arr[dim_iter];
+            }
+            assert(ref_checksum_cumm == kernel_checksum);
         }
 
         /*  Compute average */

@@ -15,9 +15,10 @@ archgpu:
 	# ./build/archgpu NUM_CHANNELS INPUT_WIDTH INPUT_HEIGH FILTER_DIM NUM_RUNS CASE_SELECT
 	# If CASE_SELECT == 1, FILTER_DIM is ignored ie integrated
 	# ./build/archgpu 2048 13 13 5 50 0
-	./build/archgpu 512 13 13 5 100 0
-	./build/archgpu 512 13 13 9 100 0
-	./build/archgpu 512 13 13 13 100 0
+	# ./build/archgpu 512 13 13 5 100 0
+	# ./build/archgpu 512 13 13 9 100 0
+	# ./build/archgpu 512 13 13 13 100 0
+	./build/archgpu 512 13 13 13 1 1
 
 inline_maxpool_integrated:
 	$(CUDA_COMPILER) -o build/maxpool_integrated $(SRC_DIR)maxpool_integrated.cu -lcublas -lcudnn
